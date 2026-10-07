@@ -21,6 +21,7 @@ packages = ["iptable_lite"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "integration: end-to-end tests that need root and NFQUEUE (deselect with '-m \"not integration\"')",
 ]
