@@ -8,6 +8,7 @@ from pathlib import Path
 
 from iptable_lite.packet import Packet
 from iptable_lite.rules import Rule, RuleSet, load_rules
+from iptable_lite.verdicts import log_verdict
 
 ACCEPT = "ACCEPT"
 DROP = "DROP"
@@ -104,16 +105,24 @@ class Firewall:
         return cls(load_rules(path))
 
     def evaluate(self, packet: Packet, chain: str | None = None) -> Evaluation:
-        """Return the single verdict for ``packet`` in ``chain`` (FR-3)."""
+        """Return the single verdict for ``packet`` in ``chain`` (FR-3).
+
+        Every verdict is logged (FR-10).
+        """
         chain = chain or packet.chain
+        evaluation = None
         for rule in self.ruleset.rules:
             if rule.chain == chain and rule_matches(rule, packet):
-                return Evaluation(verdict=rule.target, rule=rule)
-        return Evaluation(
-            verdict=self.ruleset.default_policy(chain),
-            rule=None,
-            used_default_policy=True,
-        )
+                evaluation = Evaluation(verdict=rule.target, rule=rule)
+                break
+        if evaluation is None:
+            evaluation = Evaluation(
+                verdict=self.ruleset.default_policy(chain),
+                rule=None,
+                used_default_policy=True,
+            )
+        log_verdict(evaluation, packet, chain)
+        return evaluation
 
     def verdict(self, packet: Packet, chain: str | None = None) -> str:
         return self.evaluate(packet, chain).verdict
