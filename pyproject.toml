@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iptable-lite"
+version = "0.1.0"
+description = "Small stateful packet filter inspired by iptables"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+nfqueue = ["NetfilterQueue>=1.1.0"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+iptable-lite = "iptable_lite.cli:main"
+
+[tool.setuptools]
+packages = ["iptable_lite"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end tests that need root and NFQUEUE (deselect with '-m \"not integration\"')",
+]
