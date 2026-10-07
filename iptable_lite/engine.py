@@ -8,6 +8,7 @@ from pathlib import Path
 
 from iptable_lite.packet import Packet
 from iptable_lite.rules import Rule, RuleSet, load_rules
+from iptable_lite.state import StateTable
 from iptable_lite.verdicts import log_verdict
 
 ACCEPT = "ACCEPT"
@@ -97,19 +98,25 @@ def rule_matches(rule: Rule, packet: Packet) -> bool:
 class Firewall:
     """Applies a rule set to packets, first match wins (FR-2)."""
 
-    def __init__(self, ruleset: RuleSet):
+    def __init__(self, ruleset: RuleSet, state_table: StateTable | None = None):
         self.ruleset = ruleset
+        self.state_table = state_table
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "Firewall":
-        return cls(load_rules(path))
+    def from_file(
+        cls, path: str | Path, state_table: StateTable | None = None
+    ) -> "Firewall":
+        return cls(load_rules(path), state_table=state_table)
 
     def evaluate(self, packet: Packet, chain: str | None = None) -> Evaluation:
         """Return the single verdict for ``packet`` in ``chain`` (FR-3).
 
-        Every verdict is logged (FR-10).
+        Every verdict is logged (FR-10).  When a state table is attached the
+        packet is classified as NEW/ESTABLISHED before matching (FR-7, FR-9).
         """
         chain = chain or packet.chain
+        if self.state_table is not None:
+            packet = self.state_table.annotate(packet)
         evaluation = None
         for rule in self.ruleset.rules:
             if rule.chain == chain and rule_matches(rule, packet):
