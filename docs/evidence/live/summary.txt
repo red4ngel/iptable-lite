@@ -1,0 +1,2 @@
+result=PASS
+Allowed traffic passed; blocked traffic did not reach the listener; default policy DROP was logged; stopping the filter stopped queued traffic; restarting it resumed allowed traffic.

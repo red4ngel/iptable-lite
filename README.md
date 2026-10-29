@@ -132,10 +132,12 @@ scripts/collect_evidence.sh     # write demo and test outputs under docs/evidenc
 scripts/collect_live_evidence.sh # root: isolated live evidence for allow/drop/stop/restart
 ```
 
-The live evidence script uses `sudo` only for the opt-in test. It creates a
-temporary network namespace, runs allow and default-DROP probes, stops and
-restarts the filter, and always removes the namespace. Its logs are copied to
-`docs/evidence/live/`. The host firewall is not modified.
+The offline evidence script saves the test summary and demo output to
+`docs/evidence/tests.txt` and `docs/evidence/demo.txt`. The live evidence script
+uses `sudo` only for the opt-in test. It creates a temporary network namespace,
+runs allow and default-DROP probes, stops and restarts the filter, and always
+removes the namespace. Its pytest output, filter log, server log, and summary
+are copied to `docs/evidence/live/`. The host firewall is not modified.
 
 ## Project layout
 

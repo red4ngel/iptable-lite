@@ -174,9 +174,11 @@ State classification is read-only. A flow is recorded or refreshed only after `A
 ## 9. Test Status
 
 - Command: `.venv/bin/pytest`
-- Current result: `279 passed, 1 skipped` (see `docs/test-matrix.md`).
+- Current rootless result: `281 passed, 1 skipped` (see
+  `docs/evidence/tests.txt` and `docs/test-matrix.md`).
 - The opt-in live NFQUEUE test runs in a disposable network namespace and
   checks allowed traffic, default-policy DROP, blocked traffic not reaching
   the listener, and process stop/restart. Run
-  `scripts/collect_live_evidence.sh` as a user with sudo access to save logs.
+  `scripts/collect_live_evidence.sh` as a user with sudo access to save logs
+  in `docs/evidence/live/` (pytest output, filter log, server log, and summary).
   It is skipped in ordinary unprivileged test runs.
