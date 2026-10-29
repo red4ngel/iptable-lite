@@ -153,7 +153,7 @@ State classification is read-only. A flow is recorded or refreshed only after `A
 ## 7. Remaining Limitations
 
 - `RELATED`, `INVALID`, and `UNTRACKED` are accepted by the parser but never produced by the state table.
-- Live NFQUEUE test requires root, `iptables`, and the optional `NetfilterQueue` package; it is skipped otherwise.
+- Live NFQUEUE test requires root, `iproute2`, `iptables`, and the optional `NetfilterQueue` package; it is skipped otherwise.
 - No interface matching, fragments, user-defined chains, DNAT/LOG/other targets, IPv6, non-filter tables, or ICMP type matching.
 - No persistence of state or rate buckets across process restarts.
 - Scan detection intentionally misses slow scans outside its window, and spoofed
@@ -175,7 +175,8 @@ State classification is read-only. A flow is recorded or refreshed only after `A
 
 - Command: `.venv/bin/pytest`
 - Current result: `279 passed, 1 skipped` (see `docs/test-matrix.md`).
-- The skipped test is the opt-in live NFQUEUE integration test. Enable with:
-  `sudo IPTABLE_LITE_LIVE=1 .venv/bin/pytest -m integration`. It currently
-  covers a basic live accept path; namespace isolation, blocked-destination,
-  and process stop/restart scenarios remain unverified.
+- The opt-in live NFQUEUE test runs in a disposable network namespace and
+  checks allowed traffic, default-policy DROP, blocked traffic not reaching
+  the listener, and process stop/restart. Run
+  `scripts/collect_live_evidence.sh` as a user with sudo access to save logs.
+  It is skipped in ordinary unprivileged test runs.

@@ -23,3 +23,6 @@
 - Added policy regression coverage for hospital and lab rules, accepted replies,
   SMB retries, and source-isolated SSH limits; verified by
   `tests/test_example_policies.py`.
+- Added an opt-in live NFQUEUE integration test isolated in a disposable network
+  namespace. It records allow, default-DROP, blocked-destination, and process
+  stop/restart evidence; the test is not run without explicit root opt-in.

@@ -128,3 +128,72 @@ class TestRunQueue:
         monkeypatch.setattr(nfqueue_source, "_load_netfilterqueue", lambda: FakeQueue)
         nfqueue_source.run_queue(0, ACCEPTING)
         assert state["unbound"] is True
+
+    def test_live_callback_accepts_allowed_and_blocks_other_traffic(self, monkeypatch):
+        """Exercise the live queue path without root, NFQUEUE, or network I/O."""
+        observed = {}
+
+        class FakeQueue:
+            def bind(self, queue_num, callback):
+                observed["queue_num"] = queue_num
+                observed["callback"] = callback
+
+            def run(self):
+                allowed = FakeNfPacket(
+                    build_ipv4(payload=tcp_payload(dport=22))
+                )
+                blocked = FakeNfPacket(
+                    build_ipv4(payload=tcp_payload(dport=8080))
+                )
+                observed["packets"] = (allowed, blocked)
+                observed["callback"](allowed)
+                observed["callback"](blocked)
+
+            def unbind(self):
+                observed["unbound"] = True
+
+        monkeypatch.setattr(nfqueue_source, "_load_netfilterqueue", lambda: FakeQueue)
+        nfqueue_source.run_queue(3, ACCEPTING, chain="INPUT")
+
+        allowed, blocked = observed["packets"]
+        assert observed["queue_num"] == 3
+        assert [allowed.action, blocked.action] == ["accept", "drop"]
+        assert observed["unbound"] is True
+
+
+class TestRunQueues:
+    def test_multiple_live_queues_share_firewall_and_apply_chain(self, monkeypatch):
+        """Both queue callbacks run through the live entry point with fixture bytes."""
+        observed = {}
+
+        class FakeQueue:
+            def bind(self, queue_num, callback):
+                observed[queue_num] = callback
+
+            def run(self):
+                pass
+
+            def unbind(self):
+                pass
+
+        monkeypatch.setattr(nfqueue_source, "_load_netfilterqueue", lambda: FakeQueue)
+        fw = firewall(
+            "-A INPUT -p tcp --dport 22 -j ACCEPT\n"
+            "-P INPUT DROP\n"
+            "-A OUTPUT -p tcp --dport 80 -j ACCEPT\n"
+            "-P OUTPUT DROP\n"
+        )
+        nfqueue_source.run_queues([("INPUT", 3), ("OUTPUT", 4)], fw)
+
+        inbound_ssh = FakeNfPacket(build_ipv4(payload=tcp_payload(dport=22)))
+        inbound_web = FakeNfPacket(build_ipv4(payload=tcp_payload(dport=80)))
+        outbound_web = FakeNfPacket(build_ipv4(payload=tcp_payload(dport=80)))
+        observed[3](inbound_ssh)
+        observed[3](inbound_web)
+        observed[4](outbound_web)
+
+        assert [inbound_ssh.action, inbound_web.action, outbound_web.action] == [
+            "accept",
+            "drop",
+            "accept",
+        ]

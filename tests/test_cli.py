@@ -3,6 +3,7 @@ import logging
 import pytest
 
 from iptable_lite.cli import main
+from iptable_lite import nfqueue_source
 from iptable_lite.verdicts import LOGGER_NAME
 from packet_helpers import build_ipv4, tcp_payload
 
@@ -46,8 +47,14 @@ class TestArgumentHandling:
         assert main(["--rules", rules]) == 2
         assert "line 2" in capsys.readouterr().err
 
-    def test_nfqueue_mode_without_library_fails_cleanly(self, tmp_path, capsys):
+    def test_nfqueue_mode_without_library_fails_cleanly(
+        self, tmp_path, capsys, monkeypatch
+    ):
         rules = write_rules(tmp_path, "-A INPUT -j ACCEPT\n")
+        def missing_dependency():
+            raise ImportError("NetfilterQueue is not installed")
+
+        monkeypatch.setattr(nfqueue_source, "_load_netfilterqueue", missing_dependency)
         assert main(["--rules", rules]) == 2
         assert "NetfilterQueue is required" in capsys.readouterr().err
 

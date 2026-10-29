@@ -129,7 +129,13 @@ Every packet produces exactly one line:
 .venv/bin/pytest -m integration # live NFQUEUE test (skips unless IPTABLE_LITE_LIVE=1)
 examples/demo.sh                # non-interactive offline feature demo
 scripts/collect_evidence.sh     # write demo and test outputs under docs/evidence/
+scripts/collect_live_evidence.sh # root: isolated live evidence for allow/drop/stop/restart
 ```
+
+The live evidence script uses `sudo` only for the opt-in test. It creates a
+temporary network namespace, runs allow and default-DROP probes, stops and
+restarts the filter, and always removes the namespace. Its logs are copied to
+`docs/evidence/live/`. The host firewall is not modified.
 
 ## Project layout
 
