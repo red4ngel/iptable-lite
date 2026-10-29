@@ -1,39 +1,39 @@
 
 === STEP 1: rule order and conflicting SSH rules ===
-2026-10-29 16:21:05,284 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.1:40001 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
+2026-10-29 19:13:41,993 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.1:40001 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
 ACCEPT	192.0.2.1:40001 -> 198.51.100.1:22 proto=tcp	rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
 # 1 packet(s), verdicts: ACCEPT
 
 === STEP 2: state is created only after ACCEPT; SMB retry remains NEW ===
-2026-10-29 16:21:05,380 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp' state=NEW reason=rule[3] -A INPUT -p tcp --dport 445 -j DROP
-2026-10-29 16:21:05,381 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp' state=NEW reason=rule[3] -A INPUT -p tcp --dport 445 -j DROP
+2026-10-29 19:13:42,128 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp' state=NEW reason=rule[3] -A INPUT -p tcp --dport 445 -j DROP
+2026-10-29 19:13:42,128 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp' state=NEW reason=rule[3] -A INPUT -p tcp --dport 445 -j DROP
 DROP	192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp	rule[3] -A INPUT -p tcp --dport 445 -j DROP
 DROP	192.0.2.2:40002 -> 198.51.100.1:445 proto=tcp	rule[3] -A INPUT -p tcp --dport 445 -j DROP
 # 2 packet(s), verdicts: DROP DROP
 
 === STEP 3: per-rule rate limit exhausts after burst ===
-2026-10-29 16:21:05,480 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.3:40003 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
-2026-10-29 16:21:05,481 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.3:40004 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
-2026-10-29 16:21:05,481 WARNING iptable_lite.events: event=rate_limit_hit severity=warn src=192.0.2.3 detail=rule=1 limit=0.0833333/s burst=2
-2026-10-29 16:21:05,481 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.3:40005 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[2] -A INPUT -p tcp --dport 22 -j DROP
+2026-10-29 19:13:42,270 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.3:40003 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
+2026-10-29 19:13:42,270 INFO iptable_lite.verdict: verdict=ACCEPT chain=INPUT packet='192.0.2.3:40004 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
+2026-10-29 19:13:42,271 WARNING iptable_lite.events: event=rate_limit_hit severity=warn src=192.0.2.3 detail=rule=1 limit=0.0833333/s burst=2
+2026-10-29 19:13:42,271 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.3:40005 -> 198.51.100.1:22 proto=tcp' state=NEW reason=rule[2] -A INPUT -p tcp --dport 22 -j DROP
 ACCEPT	192.0.2.3:40003 -> 198.51.100.1:22 proto=tcp	rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
 ACCEPT	192.0.2.3:40004 -> 198.51.100.1:22 proto=tcp	rule[1] -A INPUT -p tcp --dport 22 -m limit --limit 5/minute --limit-burst 2 -j ACCEPT
 DROP	192.0.2.3:40005 -> 198.51.100.1:22 proto=tcp	rule[2] -A INPUT -p tcp --dport 22 -j DROP
 # 3 packet(s), verdicts: ACCEPT ACCEPT DROP
 
 === STEP 4: scan detection raises an alert and blocks the source ===
-2026-10-29 16:21:05,584 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40011 -> 198.51.100.1:1001 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40012 -> 198.51.100.2:1002 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40013 -> 198.51.100.3:1003 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40014 -> 198.51.100.4:1004 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40015 -> 198.51.100.5:1005 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40016 -> 198.51.100.6:1006 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40017 -> 198.51.100.7:1007 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40018 -> 198.51.100.8:1008 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40019 -> 198.51.100.9:1009 proto=tcp' state=NEW reason=default policy
-2026-10-29 16:21:05,585 WARNING iptable_lite.events: event=scan_detected severity=alert src=192.0.2.4 detail=distinct=10 dst=198.51.100.10 proto=tcp dport=1010 block=60s
-2026-10-29 16:21:05,585 WARNING iptable_lite.alerts: event=scan_detected severity=alert src=192.0.2.4 detail=distinct=10 dst=198.51.100.10 proto=tcp dport=1010 block=60s
-2026-10-29 16:21:05,585 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40020 -> 198.51.100.10:1010 proto=tcp' state=NEW reason=scan detected: 192.0.2.4
+2026-10-29 19:13:42,414 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40011 -> 198.51.100.1:1001 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,414 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40012 -> 198.51.100.2:1002 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,414 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40013 -> 198.51.100.3:1003 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40014 -> 198.51.100.4:1004 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40015 -> 198.51.100.5:1005 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40016 -> 198.51.100.6:1006 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40017 -> 198.51.100.7:1007 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40018 -> 198.51.100.8:1008 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40019 -> 198.51.100.9:1009 proto=tcp' state=NEW reason=default policy
+2026-10-29 19:13:42,415 WARNING iptable_lite.events: event=scan_detected severity=alert src=192.0.2.4 detail=distinct=10 dst=198.51.100.10 proto=tcp dport=1010 block=60s
+2026-10-29 19:13:42,415 WARNING iptable_lite.alerts: event=scan_detected severity=alert src=192.0.2.4 detail=distinct=10 dst=198.51.100.10 proto=tcp dport=1010 block=60s
+2026-10-29 19:13:42,415 INFO iptable_lite.verdict: verdict=DROP chain=INPUT packet='192.0.2.4:40020 -> 198.51.100.10:1010 proto=tcp' state=NEW reason=scan detected: 192.0.2.4
 DROP	192.0.2.4:40011 -> 198.51.100.1:1001 proto=tcp	default policy
 DROP	192.0.2.4:40012 -> 198.51.100.2:1002 proto=tcp	default policy
 DROP	192.0.2.4:40013 -> 198.51.100.3:1003 proto=tcp	default policy
@@ -47,7 +47,7 @@ DROP	192.0.2.4:40020 -> 198.51.100.10:1010 proto=tcp	scan detected: 192.0.2.4
 # 10 packet(s), verdicts: DROP DROP DROP DROP DROP DROP DROP DROP DROP DROP
 
 === STEP 5: malformed packet is dropped safely ===
-2026-10-29 16:21:05,694 INFO iptable_lite.verdict: verdict=DROP chain=? packet='2 raw bytes' state=- reason=malformed packet: packet too short: 2 bytes
-2026-10-29 16:21:05,694 WARNING iptable_lite.events: event=malformed_packet severity=warn src=- detail=packet too short: 2 bytes
-DROP	/tmp/tmp.9PzZR7WmXk/bad.hex:1 2 raw bytes	malformed packet: packet too short: 2 bytes
+2026-10-29 19:13:42,547 INFO iptable_lite.verdict: verdict=DROP chain=? packet='2 raw bytes' state=- reason=malformed packet: packet too short: 2 bytes
+2026-10-29 19:13:42,547 WARNING iptable_lite.events: event=malformed_packet severity=warn src=- detail=packet too short: 2 bytes
+DROP	/tmp/tmp.BnSDBzXt6j/bad.hex:1 2 raw bytes	malformed packet: packet too short: 2 bytes
 # 1 packet(s), verdicts: DROP
