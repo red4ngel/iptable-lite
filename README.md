@@ -14,6 +14,8 @@ Linux only (NetfilterQueue requirement). Zero budget: open-source tools only.
   ports (single or ranges), with `!` negation (FR-4)
 - Stateful layer: `--state` / `--ctstate` match support, connection state
   table with idle expiry (FR-6..FR-9)
+- Rate limiting through `-m limit --limit RATE --limit-burst N`, with an
+  independent token bucket per rule
 - One structured log line per verdict (FR-10)
 - Live capture through NFQUEUE, or offline `--check` mode for
   root-less testing and demos
@@ -50,6 +52,22 @@ COMMIT
 Anything that cannot be enforced faithfully (interface matches, fragments,
 user-defined chains, non-`ACCEPT`/`DROP` targets, IPv6) is rejected with a
 `line N:` error instead of being silently ignored.
+
+## Rate limiting
+
+The iptables `limit` match is backed by a token bucket per rule:
+
+```text
+-A INPUT -p tcp --dport 80 -m limit --limit 30/minute --limit-burst 60 -j ACCEPT
+-A INPUT -p tcp --dport 80 -j DROP
+```
+
+`--limit` accepts `N/second|minute|hour|day` (short forms such as `/s`, `/min`,
+`/hr`, `/d` also work) and defaults to `3/hour`; `--limit-burst` defaults to
+`5`. A bucket starts full, spends one token per matching packet, and refills at
+the configured rate. Once the budget is empty the rule stops matching, so the
+packet falls through to later rules (or the default policy). Packets that do
+not match the rule's other fields never spend tokens.
 
 ## Usage
 
@@ -92,6 +110,7 @@ Every packet produces exactly one line:
 | `iptable_lite/rules.py` | iptables-style rule parsing (FR-1, FR-4) |
 | `iptable_lite/engine.py` | matching loop + verdicts (FR-2, FR-3, FR-5) |
 | `iptable_lite/state.py` | connection state table (FR-6..FR-9) |
+| `iptable_lite/ratelimit.py` | per-rule token-bucket rate limiter |
 | `iptable_lite/verdicts.py` | verdict logging (FR-10) |
 | `iptable_lite/nfqueue_source.py` | NFQUEUE packet source |
 | `iptable_lite/cli.py` | command-line interface |

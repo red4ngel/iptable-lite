@@ -105,6 +105,28 @@ class TestCheckMode:
         captured = capsys.readouterr()
         assert "verdict=DROP" in captured.err
 
+    def test_rate_limited_rule_falls_through_after_burst(self, tmp_path, capsys):
+        rules = write_rules(
+            tmp_path,
+            "-P INPUT DROP\n"
+            "-A INPUT -p tcp --dport 80 "
+            "-m limit --limit 1/hour --limit-burst 1 -j ACCEPT\n",
+        )
+        packets = write_packets(
+            tmp_path,
+            [
+                build_ipv4(payload=tcp_payload(dport=80)),
+                build_ipv4(payload=tcp_payload(dport=80)),
+            ],
+        )
+        assert main(["--rules", rules, "--check", packets]) == 0
+        lines = [
+            line
+            for line in capsys.readouterr().out.splitlines()
+            if not line.startswith("#")
+        ]
+        assert [line.split("\t", 1)[0] for line in lines] == ["ACCEPT", "DROP"]
+
 
 def flow_and_reply():
     forward = build_ipv4(
