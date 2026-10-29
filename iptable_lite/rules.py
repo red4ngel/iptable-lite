@@ -17,9 +17,13 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from iptable_lite.ratelimit import DEFAULT_BURST, DEFAULT_RATE
+
 VALID_TARGETS = ("ACCEPT", "DROP")
 VALID_STATES = frozenset({"NEW", "ESTABLISHED", "RELATED", "INVALID", "UNTRACKED"})
-SUPPORTED_MODULES = frozenset({"tcp", "udp", "icmp", "state", "conntrack", "comment"})
+SUPPORTED_MODULES = frozenset(
+    {"tcp", "udp", "icmp", "state", "conntrack", "comment", "limit"}
+)
 IGNORED_OPTIONS = frozenset({"-v", "--verbose", "-n", "--numeric", "-x", "--exact", "--line-numbers"})
 
 _SOURCE_OPTIONS = ("-s", "--src", "--source")
@@ -30,9 +34,38 @@ _DPORT_OPTIONS = ("--dport", "--destination-port")
 _STATE_OPTIONS = ("--state", "--ctstate")
 _JUMP_OPTIONS = ("-j", "--jump")
 
+_RATE_UNITS = {
+    "second": 1,
+    "seconds": 1,
+    "sec": 1,
+    "secs": 1,
+    "s": 1,
+    "minute": 60,
+    "minutes": 60,
+    "min": 60,
+    "mins": 60,
+    "m": 60,
+    "hour": 3600,
+    "hours": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "h": 3600,
+    "day": 86400,
+    "days": 86400,
+    "d": 86400,
+}
+
 
 class ParseError(ValueError):
     """Raised when a rule line cannot be interpreted faithfully."""
+
+
+@dataclass(frozen=True)
+class LimitSpec:
+    """Token-bucket parameters from ``-m limit`` (``--limit``/``--limit-burst``)."""
+
+    rate_per_second: float
+    burst: int
 
 
 @dataclass(frozen=True)
@@ -45,6 +78,7 @@ class MatchSpec:
     sport: tuple[int, int] | None = None
     dport: tuple[int, int] | None = None
     states: frozenset[str] | None = None
+    limit: LimitSpec | None = None
     negated: frozenset[str] = frozenset()
 
     def is_empty(self) -> bool:
@@ -55,6 +89,7 @@ class MatchSpec:
             and self.sport is None
             and self.dport is None
             and self.states is None
+            and self.limit is None
             and not self.negated
         )
 
@@ -130,6 +165,32 @@ def _normalize_states(value: str) -> frozenset[str]:
     return states
 
 
+def _normalize_rate(value: str, option: str) -> float:
+    amount, separator, unit = value.partition("/")
+    if not separator:
+        raise ParseError(f"{option}: rate must look like '5/minute', not {value!r}")
+    try:
+        count = int(amount)
+    except ValueError as exc:
+        raise ParseError(f"{option}: invalid rate {value!r}") from exc
+    if count <= 0:
+        raise ParseError(f"{option}: rate must be positive")
+    seconds = _RATE_UNITS.get(unit.lower())
+    if seconds is None:
+        raise ParseError(f"{option}: unknown rate unit {unit!r}")
+    return count / seconds
+
+
+def _normalize_burst(value: str, option: str) -> int:
+    try:
+        burst = int(value)
+    except ValueError as exc:
+        raise ParseError(f"{option}: invalid burst {value!r}") from exc
+    if burst < 1:
+        raise ParseError(f"{option}: burst must be at least 1")
+    return burst
+
+
 def _strip_command_prefix(tokens: list[str]) -> list[str]:
     if tokens and tokens[0] in ("iptables", "ip6tables"):
         if tokens[0] == "ip6tables":
@@ -167,6 +228,7 @@ def parse_rule(line: str, index: int = 0) -> Rule:
     target: str | None = None
     seen: set[str] = set()
     negate_next = False
+    limit_module = False
     fields: dict[str, object] = {}
     negated: set[str] = set()
 
@@ -259,6 +321,28 @@ def parse_rule(line: str, index: int = 0) -> Rule:
             module = tokens[i + 1].lower()
             if module not in SUPPORTED_MODULES:
                 raise ParseError(f"unsupported match module {module!r}")
+            if module == "limit":
+                limit_module = True
+            i += 2
+            continue
+
+        if token == "--limit":
+            if negate_next:
+                raise ParseError("'!' cannot negate a rate limit")
+            if i + 1 >= len(tokens):
+                raise ParseError("--limit requires a rate")
+            claim("limit")
+            fields["limit_rate"] = _normalize_rate(tokens[i + 1], token)
+            i += 2
+            continue
+
+        if token == "--limit-burst":
+            if negate_next:
+                raise ParseError("'!' cannot negate a rate limit")
+            if i + 1 >= len(tokens):
+                raise ParseError("--limit-burst requires a count")
+            claim("limit-burst")
+            fields["limit_burst"] = _normalize_burst(tokens[i + 1], token)
             i += 2
             continue
 
@@ -305,6 +389,12 @@ def parse_rule(line: str, index: int = 0) -> Rule:
     if target is None:
         raise ParseError(f"rule has no jump target: {raw!r}")
 
+    limit = None
+    if limit_module or "limit_rate" in fields or "limit_burst" in fields:
+        limit = LimitSpec(
+            rate_per_second=fields.get("limit_rate", DEFAULT_RATE),  # type: ignore[arg-type]
+            burst=fields.get("limit_burst", DEFAULT_BURST),  # type: ignore[arg-type]
+        )
     match = MatchSpec(
         src=fields.get("src"),  # type: ignore[arg-type]
         dst=fields.get("dst"),  # type: ignore[arg-type]
@@ -312,6 +402,7 @@ def parse_rule(line: str, index: int = 0) -> Rule:
         sport=fields.get("sport"),  # type: ignore[arg-type]
         dport=fields.get("dport"),  # type: ignore[arg-type]
         states=fields.get("states"),  # type: ignore[arg-type]
+        limit=limit,
         negated=frozenset(negated),
     )
     return Rule(chain=chain, match=match, target=target, raw=raw, index=index)

@@ -1,5 +1,6 @@
 import pytest
 
+from iptable_lite.ratelimit import DEFAULT_BURST, DEFAULT_RATE
 from iptable_lite.rules import (
     MatchSpec,
     ParseError,
@@ -103,6 +104,46 @@ class TestParseSingleRule:
     def test_case_insensitive_target(self):
         assert parse_rule("-A INPUT -j accept").target == "ACCEPT"
 
+    def test_limit_rate_and_burst(self):
+        rule = parse_rule(
+            "-A INPUT -p tcp -m limit --limit 5/minute --limit-burst 10 -j ACCEPT"
+        )
+        assert rule.match.limit is not None
+        assert rule.match.limit.rate_per_second == pytest.approx(5 / 60)
+        assert rule.match.limit.burst == 10
+
+    def test_limit_module_defaults(self):
+        rule = parse_rule("-A INPUT -m limit -j ACCEPT")
+        assert rule.match.limit is not None
+        assert rule.match.limit.rate_per_second == pytest.approx(DEFAULT_RATE)
+        assert rule.match.limit.burst == DEFAULT_BURST
+
+    def test_limit_options_imply_the_module(self):
+        rule = parse_rule("-A INPUT --limit 2/second -j DROP")
+        assert rule.match.limit is not None
+        assert rule.match.limit.rate_per_second == pytest.approx(2)
+        assert rule.match.limit.burst == DEFAULT_BURST
+
+    @pytest.mark.parametrize(
+        "rate, per_second",
+        [
+            ("1/second", 1),
+            ("2/sec", 2),
+            ("3/s", 3),
+            ("60/minute", 1),
+            ("120/min", 2),
+            ("120/m", 2),
+            ("3600/hour", 1),
+            ("7200/hr", 2),
+            ("7200/h", 2),
+            ("86400/day", 1),
+            ("86400/d", 1),
+        ],
+    )
+    def test_rate_units(self, rate, per_second):
+        rule = parse_rule(f"-A INPUT -m limit --limit {rate} -j ACCEPT")
+        assert rule.match.limit.rate_per_second == pytest.approx(per_second)
+
 
 class TestParseErrors:
     @pytest.mark.parametrize(
@@ -130,6 +171,26 @@ class TestParseErrors:
             ("-A INPUT ! -j DROP", "cannot negate a jump"),
             ("iptables -t nat -A PREROUTING -j DNAT", "filter table"),
             ("--wat 1 -j DROP", "unsupported option"),
+            ("-A INPUT -m limit --limit 5 -j ACCEPT", "must look like"),
+            ("-A INPUT -m limit --limit 0/minute -j ACCEPT", "positive"),
+            ("-A INPUT -m limit --limit nope/minute -j ACCEPT", "invalid rate"),
+            ("-A INPUT -m limit --limit 5/fortnight -j ACCEPT", "unknown rate unit"),
+            ("-A INPUT -m limit --limit-burst 0 -j ACCEPT", "at least 1"),
+            ("-A INPUT -m limit --limit-burst nope -j ACCEPT", "invalid burst"),
+            ("-A INPUT -m limit --limit -j ACCEPT", "must look like"),
+            ("-A INPUT -m limit --limit-burst -j ACCEPT", "invalid burst"),
+            ("-A INPUT -m limit --limit", "requires a rate"),
+            ("-A INPUT -m limit --limit-burst", "requires a count"),
+            (
+                "-A INPUT -m limit --limit 5/minute --limit 6/minute -j ACCEPT",
+                "duplicate",
+            ),
+            (
+                "-A INPUT -m limit --limit-burst 1 --limit-burst 2 -j ACCEPT",
+                "duplicate",
+            ),
+            ("-A INPUT -m limit ! --limit 5/minute -j ACCEPT", "cannot negate a rate"),
+            ("-A INPUT ! -m limit -j ACCEPT", "cannot negate a match module"),
         ],
     )
     def test_rejects_bad_rules(self, line, message):
