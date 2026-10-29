@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iptable_lite.packet import Packet
+from iptable_lite.ratelimit import RateLimiter
 from iptable_lite.rules import Rule, RuleSet, load_rules
 from iptable_lite.state import StateTable
 from iptable_lite.verdicts import log_verdict
@@ -45,7 +46,9 @@ def _port_matches(bounds: tuple[int, int], port: int | None) -> bool:
     return low <= port <= high
 
 
-def rule_matches(rule: Rule, packet: Packet) -> bool:
+def rule_matches(
+    rule: Rule, packet: Packet, rate_limiter: RateLimiter | None = None
+) -> bool:
     """Evaluate one rule's match specification against a packet (FR-4)."""
     match = rule.match
     negated = match.negated
@@ -92,21 +95,40 @@ def rule_matches(rule: Rule, packet: Packet) -> bool:
     elif "states" in negated:
         return False
 
+    # Rate limiting is checked last so packets the rule does not otherwise
+    # match never spend tokens.
+    if match.limit is not None and rate_limiter is not None:
+        if not rate_limiter.allow(
+            rule, match.limit.rate_per_second, match.limit.burst
+        ):
+            return False
+
     return True
 
 
 class Firewall:
     """Applies a rule set to packets, first match wins (FR-2)."""
 
-    def __init__(self, ruleset: RuleSet, state_table: StateTable | None = None):
+    def __init__(
+        self,
+        ruleset: RuleSet,
+        state_table: StateTable | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ):
         self.ruleset = ruleset
         self.state_table = state_table
+        self.rate_limiter = rate_limiter if rate_limiter is not None else RateLimiter()
 
     @classmethod
     def from_file(
-        cls, path: str | Path, state_table: StateTable | None = None
+        cls,
+        path: str | Path,
+        state_table: StateTable | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> "Firewall":
-        return cls(load_rules(path), state_table=state_table)
+        return cls(
+            load_rules(path), state_table=state_table, rate_limiter=rate_limiter
+        )
 
     def evaluate(self, packet: Packet, chain: str | None = None) -> Evaluation:
         """Return the single verdict for ``packet`` in ``chain`` (FR-3).
@@ -119,7 +141,9 @@ class Firewall:
             packet = self.state_table.annotate(packet)
         evaluation = None
         for rule in self.ruleset.rules:
-            if rule.chain == chain and rule_matches(rule, packet):
+            if rule.chain == chain and rule_matches(
+                rule, packet, self.rate_limiter
+            ):
                 evaluation = Evaluation(verdict=rule.target, rule=rule)
                 break
         if evaluation is None:

@@ -2,6 +2,7 @@ import pytest
 
 from iptable_lite.engine import ACCEPT, DROP, Firewall, rule_matches
 from iptable_lite.packet import Packet
+from iptable_lite.ratelimit import RateLimiter
 from iptable_lite.rules import parse_config
 
 
@@ -186,3 +187,73 @@ class TestFromFile:
 def test_every_target_value_is_enforced(target):
     fw = firewall(f"-A INPUT -j {target}\n")
     assert fw.verdict(pkt()) == target
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+class TestRateLimiting:
+    RULES = (
+        "-P INPUT DROP\n"
+        "-A INPUT -p tcp --dport 80 "
+        "-m limit --limit 1/second --limit-burst 2 -j ACCEPT\n"
+    )
+
+    def make_firewall(self, clock, text=RULES):
+        return Firewall(parse_config(text), rate_limiter=RateLimiter(clock=clock))
+
+    def test_burst_packets_pass_then_the_rest_are_dropped(self):
+        fw = self.make_firewall(FakeClock())
+        assert [fw.verdict(pkt(dport=80)) for _ in range(3)] == [
+            ACCEPT,
+            ACCEPT,
+            DROP,
+        ]
+
+    def test_refills_over_time(self):
+        clock = FakeClock()
+        fw = self.make_firewall(clock)
+        fw.verdict(pkt(dport=80))
+        fw.verdict(pkt(dport=80))
+        assert fw.verdict(pkt(dport=80)) == DROP
+        clock.advance(1)
+        assert fw.verdict(pkt(dport=80)) == ACCEPT
+        assert fw.verdict(pkt(dport=80)) == DROP
+
+    def test_packets_that_do_not_match_spend_no_tokens(self):
+        clock = FakeClock()
+        fw = self.make_firewall(
+            clock,
+            "-P INPUT ACCEPT\n"
+            "-A INPUT -p tcp --dport 80 "
+            "-m limit --limit 1/second --limit-burst 1 -j DROP\n",
+        )
+        for _ in range(5):
+            assert fw.verdict(pkt(dport=443)) == ACCEPT
+        assert fw.verdict(pkt(dport=80)) == DROP
+        assert fw.verdict(pkt(dport=80)) == ACCEPT  # default policy; limit spent
+
+    def test_each_rule_has_its_own_budget(self):
+        fw = self.make_firewall(
+            FakeClock(),
+            "-P INPUT DROP\n"
+            "-A INPUT -p tcp --dport 80 "
+            "-m limit --limit 1/hour --limit-burst 1 -j ACCEPT\n"
+            "-A INPUT -p tcp --dport 443 "
+            "-m limit --limit 1/hour --limit-burst 1 -j ACCEPT\n",
+        )
+        assert fw.verdict(pkt(dport=80)) == ACCEPT
+        assert fw.verdict(pkt(dport=80)) == DROP
+        assert fw.verdict(pkt(dport=443)) == ACCEPT
+        assert fw.verdict(pkt(dport=443)) == DROP
+
+    def test_firewall_creates_a_rate_limiter_by_default(self):
+        assert firewall("-A INPUT -j ACCEPT\n").rate_limiter is not None
