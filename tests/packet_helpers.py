@@ -10,13 +10,15 @@ def build_ipv4(
     payload=b"",
     fragment_offset=0,
     ihl_words=5,
+    mf=False,
 ):
     header_len = ihl_words * 4
     header = bytearray(header_len)
     header[0] = (4 << 4) | ihl_words
     total = header_len + len(payload)
     header[2:4] = total.to_bytes(2, "big")
-    header[6:8] = fragment_offset.to_bytes(2, "big")
+    fragment = (0x2000 if mf else 0) | fragment_offset
+    header[6:8] = fragment.to_bytes(2, "big")
     header[9] = protocol
     header[12:16] = ipaddress.IPv4Address(src).packed
     header[16:20] = ipaddress.IPv4Address(dst).packed
@@ -29,3 +31,7 @@ def tcp_payload(sport=12345, dport=80):
 
 def udp_payload(sport=50000, dport=53):
     return sport.to_bytes(2, "big") + dport.to_bytes(2, "big") + b"\x00" * 8
+
+
+def icmp_payload(kind=8):
+    return bytes([kind, 0]) + b"\x00" * 6

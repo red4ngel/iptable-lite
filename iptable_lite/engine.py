@@ -6,6 +6,8 @@ import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 
+from iptable_lite.events import EventEmitter
+from iptable_lite.hashlimit import HashLimitTable
 from iptable_lite.packet import Packet
 from iptable_lite.ratelimit import RateLimiter
 from iptable_lite.rules import Rule, RuleSet, load_rules
@@ -23,9 +25,12 @@ class Evaluation:
     verdict: str
     rule: Rule | None = None
     used_default_policy: bool = False
+    reason_override: str | None = None
 
     @property
     def reason(self) -> str:
+        if self.reason_override is not None:
+            return self.reason_override
         if self.rule is not None:
             return f"rule[{self.rule.index}] {self.rule.raw}"
         return "default policy"
@@ -46,8 +51,19 @@ def _port_matches(bounds: tuple[int, int], port: int | None) -> bool:
     return low <= port <= high
 
 
+def _emit_rate_limit_hit(
+    events: EventEmitter | None, packet: Packet, detail: str, key: str
+) -> None:
+    if events is not None:
+        events.emit("rate_limit_hit", packet.src, detail=detail, key=key)
+
+
 def rule_matches(
-    rule: Rule, packet: Packet, rate_limiter: RateLimiter | None = None
+    rule: Rule,
+    packet: Packet,
+    rate_limiter: RateLimiter | None = None,
+    hashlimit_table: HashLimitTable | None = None,
+    events: EventEmitter | None = None,
 ) -> bool:
     """Evaluate one rule's match specification against a packet (FR-4)."""
     match = rule.match
@@ -101,6 +117,40 @@ def rule_matches(
         if not rate_limiter.allow(
             rule, match.limit.rate_per_second, match.limit.burst
         ):
+            _emit_rate_limit_hit(
+                events,
+                packet,
+                detail=(
+                    f"rule={rule.index} limit="
+                    f"{match.limit.rate_per_second:g}/s "
+                    f"burst={match.limit.burst}"
+                ),
+                key=f"rule:{rule.index}",
+            )
+            return False
+
+    if match.hashlimit is not None and hashlimit_table is not None:
+        result = hashlimit_table.check(match.hashlimit, packet)
+        spec = match.hashlimit
+        if result.table_full and events is not None:
+            events.emit(
+                "hashlimit_table_full",
+                packet.src,
+                detail=f"name={spec.name} max={spec.max_entries}",
+                key=spec.name,
+            )
+        if result.exhausted:
+            _emit_rate_limit_hit(
+                events,
+                packet,
+                detail=(
+                    f"name={spec.name} "
+                    f"{'above' if spec.above else 'upto'}="
+                    f"{spec.rate_per_second:g}/s burst={spec.burst}"
+                ),
+                key=spec.name,
+            )
+        if not result.match:
             return False
 
     return True
@@ -114,10 +164,20 @@ class Firewall:
         ruleset: RuleSet,
         state_table: StateTable | None = None,
         rate_limiter: RateLimiter | None = None,
+        hashlimit_table: HashLimitTable | None = None,
+        events: EventEmitter | None = None,
+        scan_detector=None,
     ):
         self.ruleset = ruleset
         self.state_table = state_table
         self.rate_limiter = rate_limiter if rate_limiter is not None else RateLimiter()
+        self.hashlimit_table = (
+            hashlimit_table if hashlimit_table is not None else HashLimitTable()
+        )
+        self.events = events if events is not None else EventEmitter()
+        self.scan_detector = scan_detector
+        if self.scan_detector is not None and self.scan_detector.events is None:
+            self.scan_detector.events = self.events
 
     @classmethod
     def from_file(
@@ -125,24 +185,44 @@ class Firewall:
         path: str | Path,
         state_table: StateTable | None = None,
         rate_limiter: RateLimiter | None = None,
+        hashlimit_table: HashLimitTable | None = None,
+        events: EventEmitter | None = None,
+        scan_detector=None,
     ) -> "Firewall":
         return cls(
-            load_rules(path), state_table=state_table, rate_limiter=rate_limiter
+            load_rules(path),
+            state_table=state_table,
+            rate_limiter=rate_limiter,
+            hashlimit_table=hashlimit_table,
+            events=events,
+            scan_detector=scan_detector,
         )
 
-    def evaluate(self, packet: Packet, chain: str | None = None) -> Evaluation:
-        """Return the single verdict for ``packet`` in ``chain`` (FR-3).
+    def _decide(self, packet: Packet, chain: str) -> tuple[Packet, Evaluation]:
+        detector = self.scan_detector
+        if detector is not None and detector.blocked(packet.src):
+            return packet, Evaluation(
+                verdict=DROP,
+                reason_override=f"source blocked by scan detection: {packet.src}",
+            )
 
-        Every verdict is logged (FR-10).  When a state table is attached the
-        packet is classified as NEW/ESTABLISHED before matching (FR-7, FR-9).
-        """
-        chain = chain or packet.chain
         if self.state_table is not None:
             packet = self.state_table.annotate(packet)
+
+        if detector is not None and detector.observe(packet):
+            return packet, Evaluation(
+                verdict=DROP,
+                reason_override=f"scan detected: {packet.src}",
+            )
+
         evaluation = None
         for rule in self.ruleset.rules:
             if rule.chain == chain and rule_matches(
-                rule, packet, self.rate_limiter
+                rule,
+                packet,
+                self.rate_limiter,
+                self.hashlimit_table,
+                self.events,
             ):
                 evaluation = Evaluation(verdict=rule.target, rule=rule)
                 break
@@ -151,6 +231,41 @@ class Firewall:
                 verdict=self.ruleset.default_policy(chain),
                 rule=None,
                 used_default_policy=True,
+            )
+
+        if evaluation.verdict == ACCEPT and self.state_table is not None:
+            if not self.state_table.commit(packet):
+                self.events.emit(
+                    "state_table_full",
+                    packet.src,
+                    detail=(
+                        f"entries={self.state_table.max_entries} "
+                        f"timeout={self.state_table.timeout:g}s"
+                    ),
+                    key="state",
+                )
+        return packet, evaluation
+
+    def evaluate(self, packet: Packet, chain: str | None = None) -> Evaluation:
+        """Return the single verdict for ``packet`` in ``chain`` (FR-3).
+
+        Every packet gets exactly one verdict log line (FR-10).  Connection
+        state is classified read-only before matching and is committed only
+        after an ACCEPT verdict.
+        """
+        chain = chain or packet.chain
+        try:
+            packet, evaluation = self._decide(packet, chain)
+        except Exception as exc:  # never accept a packet we could not evaluate
+            evaluation = Evaluation(
+                verdict=DROP,
+                reason_override=f"evaluation error: {type(exc).__name__}: {exc}",
+            )
+            self.events.emit(
+                "evaluation_error",
+                getattr(packet, "src", "-"),
+                detail=f"{type(exc).__name__}: {exc}",
+                key="evaluation",
             )
         log_verdict(evaluation, packet, chain)
         return evaluation

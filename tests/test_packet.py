@@ -1,6 +1,6 @@
 import pytest
 
-from iptable_lite.packet import Packet, PacketParseError, parse_ipv4
+from iptable_lite.packet import FragmentError, Packet, PacketParseError, parse_ipv4
 from packet_helpers import build_ipv4, tcp_payload
 
 
@@ -14,7 +14,11 @@ class TestParseIPv4:
         assert pkt.dport == 443
 
     def test_udp_packet(self):
-        payload = (53).to_bytes(2, "big") + (5353).to_bytes(2, "big")
+        payload = (
+            (53).to_bytes(2, "big")
+            + (5353).to_bytes(2, "big")
+            + b"\x00" * 4
+        )
         pkt = parse_ipv4(build_ipv4(protocol=17, payload=payload))
         assert pkt.protocol == "udp"
         assert pkt.sport == 53
@@ -30,12 +34,11 @@ class TestParseIPv4:
         pkt = parse_ipv4(build_ipv4(protocol=47, payload=b"\x00" * 8))
         assert pkt.protocol == "47"
 
-    def test_non_initial_fragment_hides_ports(self):
-        pkt = parse_ipv4(
-            build_ipv4(payload=tcp_payload(), fragment_offset=100),
-        )
-        assert pkt.sport is None
-        assert pkt.dport is None
+    def test_fragment_is_rejected(self):
+        with pytest.raises(FragmentError):
+            parse_ipv4(
+                build_ipv4(payload=tcp_payload(), fragment_offset=100),
+            )
 
     def test_options_extend_header(self):
         pkt = parse_ipv4(build_ipv4(payload=tcp_payload(dport=22), ihl_words=6))

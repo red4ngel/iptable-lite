@@ -151,7 +151,9 @@ class TestStatefulMode:
         assert main(["--rules", rules, "--check", packets]) == 0
         lines = [l for l in capsys.readouterr().out.splitlines() if not l.startswith("#")]
         verdicts = [l.split("\t", 1)[0] for l in lines]
-        assert verdicts == ["DROP", "ACCEPT"]  # NEW then ESTABLISHED
+        # The first packet is dropped, so it never creates state: the reply
+        # is still NEW and is dropped too.
+        assert verdicts == ["DROP", "DROP"]
 
     def test_no_stateful_disables_tracking(self, tmp_path, capsys):
         rules = write_rules(tmp_path, self.RULES)
@@ -179,5 +181,5 @@ class TestStatefulMode:
         packets = write_packets(tmp_path, [forward, backward])
         assert main(["--rules", rules, "--check", packets]) == 0
         err = capsys.readouterr().err
-        assert "state=NEW" in err
-        assert "state=ESTABLISHED" in err
+        assert err.count("state=NEW") == 2
+        assert "state=ESTABLISHED" not in err

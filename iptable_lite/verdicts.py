@@ -27,6 +27,16 @@ def log_verdict(evaluation: "Evaluation", packet: "Packet", chain: str) -> None:
     )
 
 
+def log_drop(reason: str, chain: str, packet_repr: str) -> None:
+    """Log a DROP verdict for a packet that never reached rule matching."""
+    logger.info(
+        "verdict=DROP chain=%s packet=%r state=- reason=%s",
+        chain or "?",
+        packet_repr,
+        reason,
+    )
+
+
 def configure(level: int = logging.INFO) -> logging.Logger:
     """Attach a stderr handler so verdicts are visible without extra setup."""
     target = logging.getLogger(LOGGER_NAME)

@@ -17,6 +17,10 @@ Linux only (NetfilterQueue requirement). Zero budget: open-source tools only.
 - Rate limiting through `-m limit --limit RATE --limit-burst N`, with an
   independent token bucket per rule
 - One structured log line per verdict (FR-10)
+- Strict IPv4 parsing; malformed packets and every fragment are dropped
+- Per-source `hashlimit`, throttled events and alerts, and optional port-scan
+  detection
+- Bounded connection and rate-limit tables; multiple live NFQUEUE mappings
 - Live capture through NFQUEUE, or offline `--check` mode for
   root-less testing and demos
 
@@ -78,6 +82,29 @@ sudo iptables -I INPUT -j NFQUEUE --queue-num 0
 sudo .venv/bin/python -m iptable_lite --rules rules.v4 --queue-num 0
 ```
 
+For multiple chains, pass `--queue INPUT=0 --queue OUTPUT=1`. Install the
+corresponding NFQUEUE rules with `examples/setup-input-queue.sh` and
+`examples/setup-output-queue.sh`; neither uses queue bypass. The process must
+stay running for queued traffic to receive verdicts.
+
+All CLI flags:
+
+- `--rules FILE` (required), `--check FILE` (offline hex packets)
+- `--queue CHAIN=NUM` (repeatable), or legacy `--chain CHAIN --queue-num N`
+- `--state-timeout SECONDS` (300), `--state-max-entries N` (65536),
+  `--no-stateful`
+- `--default-policy ACCEPT|DROP` (fallback for undeclared chains: ACCEPT)
+- `--scan-detect`, `--scan-ports N` (10), `--scan-window SECONDS` (10),
+  `--scan-block SECONDS` (60), `--scan-max-sources N` (4096), repeatable
+  `--scan-exempt CIDR`
+- `--alert-file PATH`, `--event-throttle SECONDS` (10),
+  `--log-level DEBUG|INFO|WARNING|ERROR`
+
+The `hashlimit` rule options are `--hashlimit-name`, exactly one of
+`--hashlimit-upto`/`--hashlimit-above`, and optional `--hashlimit-burst`,
+`--hashlimit-mode`, `--hashlimit-htable-max`, `--hashlimit-htable-expire`.
+Defaults are burst 5, mode `srcip`, max 4096 keys, and expiry 60000 ms.
+
 Offline verdict check (no root, good for tests/demos):
 
 ```bash
@@ -100,6 +127,8 @@ Every packet produces exactly one line:
 ```bash
 .venv/bin/pytest                # unit + userspace integration tests
 .venv/bin/pytest -m integration # live NFQUEUE test (skips unless IPTABLE_LITE_LIVE=1)
+examples/demo.sh                # non-interactive offline feature demo
+scripts/collect_evidence.sh     # write demo and test outputs under docs/evidence/
 ```
 
 ## Project layout

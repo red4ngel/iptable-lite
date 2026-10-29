@@ -1,0 +1,26 @@
+# Lab server policy (Listing 2).
+#
+# Networks used by this policy:
+#   10.60.0.0/16  lab client machines
+#   10.20.0.0/16  lab device network (SMB must never enter)
+#
+# Inbound is default-deny.  New SSH connections are rate-limited per source
+# (5/minute, burst 5) before the general SSH accept rule.  Outbound traffic
+# is allowed so the server can initiate connections; their replies arrive as
+# ESTABLISHED on INPUT.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -s 10.60.0.0/16 -p tcp --dport 22 -m hashlimit --hashlimit-name lab-ssh --hashlimit-above 5/minute --hashlimit-burst 5 --hashlimit-mode srcip -j DROP
+-A INPUT -s 10.60.0.0/16 -p tcp --dport 22 -j ACCEPT
+-A INPUT -s 10.60.0.0/16 -p tcp --dport 80 -j ACCEPT
+-A INPUT -s 10.60.0.0/16 -p tcp --dport 443 -j ACCEPT
+-A INPUT -s 10.60.0.0/16 -p udp --dport 53 -j ACCEPT
+# SMB toward lab devices is always blocked; retries remain NEW and are also
+# dropped because only accepted packets create connection state.
+-A INPUT -d 10.20.0.0/16 -p tcp --dport 445 -j DROP
+
+COMMIT

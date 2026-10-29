@@ -1,0 +1,24 @@
+# Hospital network policy (Listing 1).
+#
+# Networks used by this policy:
+#   10.10.0.0/16  clinical/staff workstations
+#   10.20.0.0/16  medical device network (SMB must never enter)
+#   10.30.0.0/16  hospital administration / jump hosts
+#
+# Default deny inbound and forwarded traffic; replies to connections opened
+# by the hospital itself are allowed by the ESTABLISHED rule.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -s 10.30.0.0/16 -p tcp --dport 22 -j ACCEPT
+-A INPUT -s 10.10.0.0/16 -p tcp --dport 80 -j ACCEPT
+-A INPUT -s 10.10.0.0/16 -p tcp --dport 443 -j ACCEPT
+-A INPUT -s 10.10.0.0/16 -p udp --dport 53 -j ACCEPT
+# SMB is forbidden toward medical devices.  The rule deliberately sits below
+# ESTABLISHED: a dropped SYN never creates state, so a retry stays NEW.
+-A INPUT -d 10.20.0.0/16 -p tcp --dport 445 -j DROP
+
+COMMIT
